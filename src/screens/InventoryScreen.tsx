@@ -1,0 +1,241 @@
+import React, { useState, useEffect } from "react";
+import {
+  SafeAreaView,
+  View,
+  Text,
+  FlatList,
+  TextInput,
+  TouchableOpacity,
+  Modal,
+  StyleSheet,
+  Alert,
+  Pressable,
+} from "react-native";
+import { db, initDatabase } from "../services/db";
+import { useApp } from "../store";
+import { colors, fonts } from "../theme";
+
+type Product = {
+  id: number;
+  name: string;
+  category: string;
+  price: number;
+  stock: number;
+};
+
+export default function InventoryScreen() {
+  const { go } = useApp();
+  const [products, setProducts] = useState<Product[]>([]);
+  const [search, setSearch] = useState("");
+  const [modalVisible, setModalVisible] = useState(false);
+  const [name, setName] = useState("");
+  const [price, setPrice] = useState("");
+  const [stock, setStock] = useState("");
+
+  const loadData = (query = "") => {
+    if (query.trim() === "") {
+      const allRows = db.getAllSync(
+        "SELECT * FROM products ORDER BY id DESC;"
+      ) as Product[];
+      setProducts(allRows);
+    } else {
+      const filtered = db.getAllSync(
+        "SELECT * FROM products WHERE name LIKE ? ORDER BY name ASC;",
+        [`%${query}%`]
+      ) as Product[];
+      setProducts(filtered);
+    }
+  };
+
+  useEffect(() => {
+    initDatabase();
+    loadData();
+  }, []);
+
+  const handleAddProduct = () => {
+    if (!name || !price || !stock) {
+      Alert.alert("Validation Error", "Please fill in all product fields.");
+      return;
+    }
+    db.runSync(
+      "INSERT INTO products (name, category, price, stock) VALUES (?, ?, ?, ?);",
+      [name, "General", parseFloat(price), parseInt(stock, 10)]
+    );
+    setName("");
+    setPrice("");
+    setStock("");
+    setModalVisible(false);
+    loadData(search);
+  };
+
+  const handleDelete = (id: number, prodName: string) => {
+    Alert.alert("Delete Confirmation", `Remove ${prodName}?`, [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Delete",
+        style: "destructive",
+        onPress: () => {
+          db.runSync("DELETE FROM products WHERE id = ?;", [id]);
+          loadData(search);
+        },
+      },
+    ]);
+  };
+
+  const adjustStock = (id: number, delta: number) => {
+    db.runSync(
+      "UPDATE products SET stock = MAX(stock + ?, 0) WHERE id = ?;",
+      [delta, id]
+    );
+    loadData(search);
+  };
+
+  return (
+    <SafeAreaView style={styles.container}>
+      <View style={styles.headerRow}>
+        <Pressable onPress={() => go("home")}>
+          <Text style={styles.back}>‹ Back</Text>
+        </Pressable>
+        <TouchableOpacity style={styles.addBtn} onPress={() => setModalVisible(true)}>
+          <Text style={styles.addBtnText}>+ Add Item</Text>
+        </TouchableOpacity>
+      </View>
+      <Text style={styles.title}>Inventory Database (SQLite)</Text>
+      <TextInput
+        style={styles.searchBar}
+        placeholder="Search items by name (SQL LIKE)..."
+        value={search}
+        onChangeText={(text) => {
+          setSearch(text);
+          loadData(text);
+        }}
+      />
+      <FlatList
+        data={products}
+        keyExtractor={(item) => String(item.id)}
+        renderItem={({ item }) => (
+          <View style={styles.card}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.itemName}>{item.name}</Text>
+              <Text style={styles.itemMeta}>
+                Cat: {item.category} | Stock: {item.stock} units
+              </Text>
+              <View style={styles.stockRow}>
+                <TouchableOpacity onPress={() => adjustStock(item.id, -1)} style={styles.stockBtn}>
+                  <Text style={styles.stockBtnText}>-</Text>
+                </TouchableOpacity>
+                <TouchableOpacity onPress={() => adjustStock(item.id, 1)} style={styles.stockBtn}>
+                  <Text style={styles.stockBtnText}>+</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+            <Text style={styles.itemPrice}>₱{item.price.toFixed(2)}</Text>
+            <TouchableOpacity
+              onPress={() => handleDelete(item.id, item.name)}
+              style={styles.delBtn}
+            >
+              <Text style={styles.delBtnText}>X</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+        ListEmptyComponent={
+          <Text style={styles.empty}>No products found in SQLite database.</Text>
+        }
+      />
+      <Modal visible={modalVisible} animationType="slide" transparent>
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>New Product Entry</Text>
+            <TextInput style={styles.input} placeholder="Product Name" value={name} onChangeText={setName} />
+            <TextInput style={styles.input} placeholder="Price (PHP)" keyboardType="numeric" value={price} onChangeText={setPrice} />
+            <TextInput style={styles.input} placeholder="Initial Stock" keyboardType="numeric" value={stock} onChangeText={setStock} />
+            <View style={styles.modalBtns}>
+              <TouchableOpacity style={styles.cancelBtn} onPress={() => setModalVisible(false)}>
+                <Text style={styles.btnText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.saveBtn} onPress={handleAddProduct}>
+                <Text style={[styles.btnText, { color: "#FFF" }]}>Save to SQLite</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+    </SafeAreaView>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: { flex: 1, backgroundColor: "#F8FAFC", padding: 16 },
+  headerRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 12,
+  },
+  back: { fontSize: 16, color: colors.ink, fontWeight: "600" },
+  title: { fontSize: 18, fontWeight: "bold", color: "#0E2A35", marginBottom: 10 },
+  addBtn: {
+    backgroundColor: "#00758F",
+    paddingVertical: 8,
+    paddingHorizontal: 14,
+    borderRadius: 6,
+  },
+  addBtnText: { color: "#FFFFFF", fontWeight: "bold", fontSize: 13 },
+  searchBar: {
+    backgroundColor: "#FFF",
+    borderWidth: 1,
+    borderColor: "#CBD5E1",
+    borderRadius: 8,
+    padding: 10,
+    marginBottom: 12,
+  },
+  card: {
+    flexDirection: "row",
+    backgroundColor: "#FFF",
+    padding: 12,
+    borderRadius: 8,
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+    alignItems: "center",
+  },
+  itemName: { fontSize: 15, fontWeight: "bold", color: "#1E293B" },
+  itemMeta: { fontSize: 12, color: "#64748B", marginTop: 2 },
+  stockRow: { flexDirection: "row", gap: 8, marginTop: 6 },
+  stockBtn: {
+    backgroundColor: "#E2E8F0",
+    paddingHorizontal: 10,
+    paddingVertical: 2,
+    borderRadius: 4,
+  },
+  stockBtnText: { fontWeight: "bold", color: "#1E293B" },
+  itemPrice: { fontSize: 15, fontWeight: "bold", color: "#00758F", marginRight: 12 },
+  delBtn: { backgroundColor: "#FEE2E2", paddingHorizontal: 9, paddingVertical: 5, borderRadius: 4 },
+  delBtnText: { color: "#DC2626", fontWeight: "bold", fontSize: 13 },
+  empty: { textAlign: "center", color: "#64748B", marginTop: 30 },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.5)",
+    justifyContent: "center",
+    padding: 20,
+  },
+  modalCard: { backgroundColor: "#FFF", borderRadius: 12, padding: 20 },
+  modalTitle: { fontSize: 18, fontWeight: "bold", color: "#0E2A35", marginBottom: 14 },
+  input: {
+    borderWidth: 1,
+    borderColor: "#CBD5E1",
+    borderRadius: 6,
+    padding: 10,
+    marginBottom: 10,
+  },
+  modalBtns: { flexDirection: "row", justifyContent: "flex-end", gap: 10, marginTop: 10 },
+  cancelBtn: { padding: 10 },
+  saveBtn: {
+    backgroundColor: "#00758F",
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    borderRadius: 6,
+  },
+  btnText: { fontWeight: "bold", color: "#64748B" },
+});
+
